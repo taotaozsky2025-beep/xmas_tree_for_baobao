@@ -24,7 +24,21 @@
             transform: scaleX(-1); /* Mirror feedback */
             background: #000;
         }
-        #input_video { width: 100%; height: 100%; object-fit: cover; }
+        #input_video { 
+            width: 100%; 
+            height: 100%; 
+            object-fit: cover; 
+            display: block;
+        }
+        /* Add a canvas for drawing landmarks over the video */
+        #output_canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
         #loading {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             background: #000; color: #D4AF37; display: flex;
@@ -115,6 +129,7 @@
     <!-- Webcam Feed -->
     <div id="video-container">
         <video id="input_video" playsinline></video>
+        <canvas id="output_canvas"></canvas>
     </div>
 
     <!-- 3D Canvas Container -->
@@ -688,11 +703,35 @@
         async function setupMediaPipe() {
             updateProgressBar(30);
             const videoElement = document.getElementById('input_video');
+            const canvasElement = document.getElementById('output_canvas');
+            const canvasCtx = canvasElement.getContext('2d');
+
+            // Set canvas size to match video
+            videoElement.addEventListener('loadeddata', () => {
+                canvasElement.width = videoElement.videoWidth;
+                canvasElement.height = videoElement.videoHeight;
+            });
+
             try {
                 const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
                 updateProgressBar(50);
-                hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
-                hands.onResults(onHandResults);
+                hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
+                
+                hands.onResults((results) => {
+                    // Draw landmarks for feedback
+                    canvasCtx.save();
+                    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+                    if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                        for (const landmarks of results.multiHandLandmarks) {
+                            drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 2});
+                            drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 1, radius: 3});
+                        }
+                    }
+                    canvasCtx.restore();
+                    
+                    onHandResults(results);
+                });
+                
                 updateProgressBar(70);
 
                 if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error("No getUserMedia");
@@ -761,23 +800,57 @@
             appState = CONFIG.states.SCATTER;
         }
 
+        // Updated Gesture Logic: Uses relative distance (scale invariant)
         function detectGesture(landmarks) {
-            const dist = (i, j) => Math.sqrt(Math.pow(landmarks[i].x - landmarks[j].x, 2) + Math.pow(landmarks[i].y - landmarks[j].y, 2));
-            const thumbTip = 4, indexTip = 8, wrist = 0;
-            if (dist(thumbTip, indexTip) < 0.05) return 'GRAB';
-            const tips = [8, 12, 16, 20];
-            let extended = 0;
-            tips.forEach(tip => { if (dist(tip, wrist) > 0.3) extended++; });
-            if (extended >= 4) return 'OPEN';
-            if (extended <= 1) return 'FIST';
+            const wrist = landmarks[0];
+            
+            // 1. Pinch Detection (Grab)
+            // Distance between thumb tip and index tip
+            const thumbTip = landmarks[4];
+            const indexTip = landmarks[8];
+            const pinchDist = Math.sqrt(Math.pow(thumbTip.x - indexTip.x, 2) + Math.pow(thumbTip.y - indexTip.y, 2));
+            
+            // Compare to palm size (wrist to index MCP) to be distance-invariant
+            const palmSize = Math.sqrt(Math.pow(wrist.x - landmarks[5].x, 2) + Math.pow(wrist.y - landmarks[5].y, 2));
+            
+            // If pinch distance is less than half palm size -> Grab
+            if (pinchDist < palmSize * 0.5) return 'GRAB';
+
+            // 2. Open/Fist Detection
+            // Check if finger tips are further from wrist than their PIP joints
+            const fingerIndices = [
+                { tip: 8, pip: 6 },  // Index
+                { tip: 12, pip: 10 }, // Middle
+                { tip: 16, pip: 14 }, // Ring
+                { tip: 20, pip: 18 }  // Pinky
+            ];
+
+            let extendedCount = 0;
+            fingerIndices.forEach(finger => {
+                const tip = landmarks[finger.tip];
+                const pip = landmarks[finger.pip];
+                
+                const dTip = Math.sqrt(Math.pow(tip.x - wrist.x, 2) + Math.pow(tip.y - wrist.y, 2));
+                const dPip = Math.sqrt(Math.pow(pip.x - wrist.x, 2) + Math.pow(pip.y - wrist.y, 2));
+                
+                // If tip is further than PIP, finger is extended
+                if (dTip > dPip) extendedCount++;
+            });
+
+            // 3+ fingers extended = Open, 0-1 = Fist
+            if (extendedCount >= 3) return 'OPEN';
+            if (extendedCount <= 1) return 'FIST';
+            
             return 'NONE';
         }
 
         function onHandResults(results) {
             if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
                 const lm = results.multiHandLandmarks[0];
+                // Mirror x coordinate because video is mirrored
                 handState.x = (1 - lm[9].x) * 2 - 1;
                 handState.y = -(lm[9].y * 2 - 1);
+                
                 const gesture = detectGesture(lm);
                 handState.gesture = gesture;
 
@@ -798,6 +871,9 @@
                     }
                     updateStatus('ZOOM', '照片放大态');
                 }
+            } else {
+                // Optional: handle no hand detected
+                // updateStatus(appState, '未检测到手势');
             }
         }
 
