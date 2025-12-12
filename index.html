@@ -252,6 +252,23 @@
             }
         });
 
+        // 监听网页可见性变化，自动恢复摄像头
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                const video = document.getElementById('input_video');
+                if (video) {
+                    // 尝试恢复播放，解决手机切后台或选文件后卡顿问题
+                    video.play().catch(err => {
+                        console.warn("自动恢复摄像头失败:", err);
+                        // 如果因为流断开导致无法播放，可能需要刷新页面
+                        if (video.srcObject && !video.srcObject.active) {
+                            statusText.innerText = "摄像头连接中断，请刷新页面";
+                        }
+                    });
+                }
+            }
+        });
+
         // --- Initialization ---
         async function init() {
             scene = new THREE.Scene();
@@ -751,6 +768,15 @@
             Promise.all(promises).then(() => {
                 if(btnText) btnText.innerText = originalText;
                 alert(`成功！${files.length} 张照片已上树！`);
+                
+                // FORCE resume camera on mobile after upload completes
+                setTimeout(() => {
+                    const video = document.getElementById('input_video');
+                    if (video && video.paused) {
+                        video.play().catch(e => console.warn("Upload resume error:", e));
+                    }
+                }, 500);
+
             }).catch(err => {
                 console.error("Upload process error", err);
                 if(btnText) btnText.innerText = originalText;
