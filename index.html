@@ -2,14 +2,15 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>圣诞手势粒子系统 | Gesture Christmas Tree</title>
     <!-- Tailwind CSS for UI -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         /* Deep black background to contrast with the bright lights */
-        body { margin: 0; overflow: hidden; background-color: #000000; font-family: 'Segoe UI', sans-serif; }
+        body { margin: 0; overflow: hidden; background-color: #000000; font-family: 'Segoe UI', sans-serif; touch-action: none; }
         canvas { display: block; }
+        
         #video-container {
             position: absolute;
             bottom: 20px;
@@ -23,13 +24,16 @@
             z-index: 10;
             transform: scaleX(-1); /* Mirror feedback */
             background: #000;
+            transition: all 0.3s ease;
         }
+
         #input_video { 
             width: 100%; 
             height: 100%; 
             object-fit: cover; 
             display: block;
         }
+        
         /* Add a canvas for drawing landmarks over the video */
         #output_canvas {
             position: absolute;
@@ -39,23 +43,44 @@
             height: 100%;
             pointer-events: none;
         }
+
         #loading {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             background: #000; color: #D4AF37; display: flex;
             flex-direction: column; justify-content: center; align-items: center;
             z-index: 50; transition: opacity 1s;
         }
+
         .ui-panel {
             position: absolute; top: 20px; left: 20px;
             background: rgba(0, 0, 0, 0.6);
             backdrop-filter: blur(12px);
-            padding: 20px; border-radius: 16px;
+            padding: 15px; border-radius: 16px;
             border-left: 4px solid #D4AF37;
-            color: #fff; pointer-events: auto; /* Changed to auto for button interaction */
+            color: #fff; pointer-events: auto;
             max-width: 320px;
             box-shadow: 0 0 30px rgba(212, 175, 55, 0.15);
             transition: all 0.3s ease;
+            z-index: 20;
         }
+
+        /* Collapsed state class */
+        .ui-panel.collapsed {
+            max-width: 200px;
+            padding-bottom: 5px;
+        }
+        .ui-panel.collapsed #panel-content {
+            display: none;
+        }
+        
+        /* Toggle button rotation */
+        #panel-toggle {
+            transition: transform 0.3s ease;
+        }
+        .ui-panel.collapsed #panel-toggle {
+            transform: rotate(180deg);
+        }
+
         .status-indicator {
             display: inline-block; width: 10px; height: 10px; border-radius: 50%;
             margin-right: 8px; background-color: #555;
@@ -79,6 +104,21 @@
         }
         #upload-btn:hover { transform: scale(1.05); box-shadow: 0 0 15px #FFD700; }
         input[type="file"] { display: none; }
+
+        /* Mobile Adjustments */
+        @media (max-width: 768px) {
+            .ui-panel {
+                top: 10px; left: 10px; right: 10px;
+                max-width: none;
+                width: calc(100% - 20px);
+            }
+            .ui-panel h1 { font-size: 1.1rem; }
+            #video-container {
+                width: 120px; height: 90px;
+                bottom: 10px; right: 10px;
+                opacity: 0.8;
+            }
+        }
     </style>
     
     <!-- Import Maps for Three.js -->
@@ -95,7 +135,6 @@
 
     <!-- Loading Screen -->
     <div id="loading">
-        <!-- Modified: Changed title text as requested -->
         <div class="text-2xl font-bold tracking-widest mb-4 text-yellow-400" style="text-shadow: 0 0 15px #D4AF37;">Christmas Gift For 亲爱的宝包</div>
         <div class="text-sm opacity-70">打开礼物中</div>
         <div class="mt-4 w-48 h-1 bg-gray-800 rounded overflow-hidden">
@@ -104,26 +143,34 @@
     </div>
 
     <!-- UI Overlay -->
-    <div class="ui-panel">
-        <h1 class="text-xl font-bold text-yellow-400 mb-2" style="text-shadow: 0 0 10px #D4AF37;">交互控制台</h1>
-        <div class="mb-2 flex items-center">
-            <span id="status-dot" class="status-indicator"></span>
-            <span id="status-text" class="text-sm font-mono tracking-wide">等待初始化...</span>
+    <div class="ui-panel" id="main-panel">
+        <div class="flex justify-between items-center mb-2">
+            <h1 class="text-xl font-bold text-yellow-400" style="text-shadow: 0 0 10px #D4AF37;">交互控制台</h1>
+            <button id="panel-toggle" class="text-yellow-400 hover:text-white p-1 focus:outline-none">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
+                </svg>
+            </button>
         </div>
-        <ul id="control-list" class="text-xs space-y-2 text-gray-300 mt-4 opacity-90">
-            <li>✊ <b>握拳：</b> 聚合为圣诞树</li>
-            <li>🖐 <b>张开五指：</b> 散开漂浮</li>
-            <li>👋 <b>手掌移动：</b> 旋转视角 (散开模式)</li>
-            <li>👌 <b>捏合/抓取：</b> 抓取并放大照片</li>
-        </ul>
         
-        <label id="upload-btn" class="w-full mb-2 block">
-            <!-- Wrapped text in span to protect input element -->
-            <span id="upload-text">📷 上传照片 (生成照片云)</span>
-            <input type="file" id="image-upload" multiple accept="image/*">
-        </label>
-
-        <!-- Removed Gemini AI Section -->
+        <!-- Content wrapper for toggling -->
+        <div id="panel-content">
+            <div class="mb-2 flex items-center">
+                <span id="status-dot" class="status-indicator"></span>
+                <span id="status-text" class="text-sm font-mono tracking-wide">等待初始化...</span>
+            </div>
+            <ul id="control-list" class="text-xs space-y-2 text-gray-300 mt-4 opacity-90">
+                <li>✊ <b>握拳：</b> 聚合为圣诞树</li>
+                <li>🖐 <b>张开五指：</b> 散开漂浮</li>
+                <li>👋 <b>手掌移动：</b> 旋转视角 (散开模式)</li>
+                <li>👌 <b>捏合/抓取：</b> 抓取并放大照片</li>
+            </ul>
+            
+            <label id="upload-btn" class="w-full mb-2 block mt-4">
+                <span id="upload-text">📷 上传照片 (生成照片云)</span>
+                <input type="file" id="image-upload" multiple accept="image/*">
+            </label>
+        </div>
     </div>
 
     <!-- Webcam Feed -->
@@ -158,7 +205,7 @@
                 warmWhite: 0xFFF5E1
             },
             particles: {
-                count: 3200, // Increased density from 2500 to 3200
+                count: 3200, // Increased density
                 snowCount: 800 // More snow
             },
             states: {
@@ -190,6 +237,20 @@
         const progressBar = document.getElementById('progress-bar');
         const statusText = document.getElementById('status-text');
         const statusDot = document.getElementById('status-dot');
+
+        // --- UI Logic ---
+        const panelToggleBtn = document.getElementById('panel-toggle');
+        const mainPanel = document.getElementById('main-panel');
+        let isPanelCollapsed = false;
+
+        panelToggleBtn.addEventListener('click', () => {
+            isPanelCollapsed = !isPanelCollapsed;
+            if (isPanelCollapsed) {
+                mainPanel.classList.add('collapsed');
+            } else {
+                mainPanel.classList.remove('collapsed');
+            }
+        });
 
         // --- Initialization ---
         async function init() {
@@ -800,47 +861,15 @@
             appState = CONFIG.states.SCATTER;
         }
 
-        // Updated Gesture Logic: Uses relative distance (scale invariant)
         function detectGesture(landmarks) {
-            const wrist = landmarks[0];
-            
-            // 1. Pinch Detection (Grab)
-            // Distance between thumb tip and index tip
-            const thumbTip = landmarks[4];
-            const indexTip = landmarks[8];
-            const pinchDist = Math.sqrt(Math.pow(thumbTip.x - indexTip.x, 2) + Math.pow(thumbTip.y - indexTip.y, 2));
-            
-            // Compare to palm size (wrist to index MCP) to be distance-invariant
-            const palmSize = Math.sqrt(Math.pow(wrist.x - landmarks[5].x, 2) + Math.pow(wrist.y - landmarks[5].y, 2));
-            
-            // If pinch distance is less than half palm size -> Grab
-            if (pinchDist < palmSize * 0.5) return 'GRAB';
-
-            // 2. Open/Fist Detection
-            // Check if finger tips are further from wrist than their PIP joints
-            const fingerIndices = [
-                { tip: 8, pip: 6 },  // Index
-                { tip: 12, pip: 10 }, // Middle
-                { tip: 16, pip: 14 }, // Ring
-                { tip: 20, pip: 18 }  // Pinky
-            ];
-
-            let extendedCount = 0;
-            fingerIndices.forEach(finger => {
-                const tip = landmarks[finger.tip];
-                const pip = landmarks[finger.pip];
-                
-                const dTip = Math.sqrt(Math.pow(tip.x - wrist.x, 2) + Math.pow(tip.y - wrist.y, 2));
-                const dPip = Math.sqrt(Math.pow(pip.x - wrist.x, 2) + Math.pow(pip.y - wrist.y, 2));
-                
-                // If tip is further than PIP, finger is extended
-                if (dTip > dPip) extendedCount++;
-            });
-
-            // 3+ fingers extended = Open, 0-1 = Fist
-            if (extendedCount >= 3) return 'OPEN';
-            if (extendedCount <= 1) return 'FIST';
-            
+            const dist = (i, j) => Math.sqrt(Math.pow(landmarks[i].x - landmarks[j].x, 2) + Math.pow(landmarks[i].y - landmarks[j].y, 2));
+            const thumbTip = 4, indexTip = 8, wrist = 0;
+            if (dist(thumbTip, indexTip) < 0.05) return 'GRAB';
+            const tips = [8, 12, 16, 20];
+            let extended = 0;
+            tips.forEach(tip => { if (dist(tip, wrist) > 0.3) extended++; });
+            if (extended >= 4) return 'OPEN';
+            if (extended <= 1) return 'FIST';
             return 'NONE';
         }
 
@@ -859,7 +888,8 @@
                     zoomedParticleIndex = -1;
                     updateStatus('TREE', '合拢态 (圣诞树)');
                 } else if (gesture === 'OPEN') {
-                    if (appState !== CONFIG.states.SCATTER && appState !== CONFIG.states.ZOOM) {
+                    // MODIFIED: Always allow transition to SCATTER if gesture is OPEN
+                    if (appState !== CONFIG.states.SCATTER) {
                         appState = CONFIG.states.SCATTER;
                         zoomedParticleIndex = -1;
                     }
