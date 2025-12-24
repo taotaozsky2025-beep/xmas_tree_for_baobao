@@ -105,6 +105,19 @@
         #upload-btn:hover { transform: scale(1.05); box-shadow: 0 0 15px #FFD700; }
         input[type="file"] { display: none; }
 
+        /* Music Button Styles */
+        #music-btn {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid #D4AF37;
+            color: #D4AF37;
+            transition: all 0.3s ease;
+        }
+        #music-btn.playing {
+            background: #D4AF37;
+            color: #000;
+            box-shadow: 0 0 15px #D4AF37;
+        }
+
         /* Mobile Adjustments */
         @media (max-width: 768px) {
             .ui-panel {
@@ -146,11 +159,18 @@
     <div class="ui-panel" id="main-panel">
         <div class="flex justify-between items-center mb-2">
             <h1 class="text-xl font-bold text-yellow-400" style="text-shadow: 0 0 10px #D4AF37;">交互控制台</h1>
-            <button id="panel-toggle" class="text-yellow-400 hover:text-white p-1 focus:outline-none">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
-                </svg>
-            </button>
+            <div class="flex gap-2">
+                <!-- Music Button -->
+                <button id="music-btn" class="p-1 rounded-full w-8 h-8 flex items-center justify-center focus:outline-none" title="播放/暂停音乐">
+                    <span id="music-icon">🎵</span>
+                </button>
+                <!-- Toggle Panel Button -->
+                <button id="panel-toggle" class="text-yellow-400 hover:text-white p-1 focus:outline-none">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
+                    </svg>
+                </button>
+            </div>
         </div>
         
         <!-- Content wrapper for toggling -->
@@ -196,16 +216,13 @@
 
         // ==========================================================================
         //  GitHub 自动加载配置
-        //  请确保你的仓库是 Public (公开) 的，否则 API 无法读取
         // ==========================================================================
         const GITHUB_CONFIG = {
             enabled: true,
-            // 你的 GitHub 用户名 (根据你的文件路径推测)
             username: 'taotaozsky2025-beep', 
-            // 你的 仓库名 (根据你的文件路径推测)
             repo: 'xmas_tree_for_baobao',    
-            // 存放照片的文件夹名称，请在仓库根目录下创建这个文件夹
-            folder: 'photos'           
+            photoFolder: 'photos', // 存放照片的文件夹
+            audioFolder: 'audio'   // 存放音乐的文件夹 (mp3, wav, etc.)
         };
 
         // --- Configuration ---
@@ -240,6 +257,13 @@
         let time = 0;
         let zoomedParticleIndex = -1;
 
+        // Audio Variables
+        let audioPlaylist = [];
+        let currentTrackIndex = 0;
+        let isMusicPlaying = false;
+        const bgmAudio = new Audio();
+        bgmAudio.loop = false; // We handle looping manually for playlists
+
         // Interaction Variables
         let handState = {
             gesture: 'NONE',
@@ -255,6 +279,7 @@
         // --- UI Logic ---
         const panelToggleBtn = document.getElementById('panel-toggle');
         const mainPanel = document.getElementById('main-panel');
+        const musicBtn = document.getElementById('music-btn');
         let isPanelCollapsed = false;
 
         panelToggleBtn.addEventListener('click', () => {
@@ -265,6 +290,54 @@
                 mainPanel.classList.remove('collapsed');
             }
         });
+
+        // Music Control
+        musicBtn.addEventListener('click', () => {
+            toggleMusic();
+        });
+
+        // Attempt to play music on first interaction (required by browsers)
+        window.addEventListener('click', () => {
+            if (!isMusicPlaying && audioPlaylist.length > 0) {
+                // Only auto-play if we haven't started yet and have tracks
+                // We don't want to pause if user clicked to pause
+                // But initially, this helps start the audio context
+                // toggleMusic(); // Optional: uncomment if you want click-anywhere to play
+            }
+        }, { once: true });
+
+        function toggleMusic() {
+            if (audioPlaylist.length === 0) {
+                alert("未在 GitHub 'audio' 文件夹中找到音乐文件，或加载失败。");
+                return;
+            }
+
+            if (isMusicPlaying) {
+                bgmAudio.pause();
+                isMusicPlaying = false;
+                musicBtn.classList.remove('playing');
+                musicBtn.innerHTML = '<span id="music-icon">🎵</span>'; // Stopped icon
+            } else {
+                // If src is not set, set it
+                if (!bgmAudio.src) {
+                    bgmAudio.src = audioPlaylist[currentTrackIndex];
+                }
+                bgmAudio.play().then(() => {
+                    isMusicPlaying = true;
+                    musicBtn.classList.add('playing');
+                    musicBtn.innerHTML = '<span id="music-icon" class="animate-spin">💿</span>'; // Playing icon
+                }).catch(err => {
+                    console.warn("Audio play failed:", err);
+                });
+            }
+        }
+
+        // Handle Track Ending (Loop Playlist)
+        bgmAudio.onended = () => {
+            currentTrackIndex = (currentTrackIndex + 1) % audioPlaylist.length;
+            bgmAudio.src = audioPlaylist[currentTrackIndex];
+            bgmAudio.play().catch(console.error);
+        };
 
         // 监听网页可见性变化，自动恢复摄像头
         document.addEventListener('visibilitychange', () => {
@@ -313,7 +386,7 @@
             centerLight.position.set(0, 10, 0);
             scene.add(centerLight);
 
-            // Post Processing - Bloom Settings
+            // Post Processing
             const renderScene = new RenderPass(scene, camera);
             const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.85);
             bloomPass.threshold = 0.15; 
@@ -324,10 +397,12 @@
             composer.addPass(renderScene);
             composer.addPass(bloomPass);
 
-            // 1. Try to load photos from GitHub first
-            await loadGitHubPhotos();
+            // Async Loads
+            await Promise.all([
+                loadGitHubPhotos(),
+                loadGitHubAudio() // Load music
+            ]);
             
-            // 2. If no photos loaded (API limit or empty folder), create default placeholders
             if (userPhotos.length === 0) {
                 createDefaultTextures();
             }
@@ -336,6 +411,7 @@
             createLightStrip(); 
             createTextParticles(); 
             createSnowfall();
+            createSnowGround(); 
             createTopStar();
 
             await setupMediaPipe();
@@ -352,69 +428,77 @@
             animate();
         }
 
-        // --- GitHub Photo Loading Logic ---
+        // --- GitHub Loading Logic ---
+        
         async function loadGitHubPhotos() {
             if (!GITHUB_CONFIG.enabled) return;
-
-            const apiUrl = `https://api.github.com/repos/${GITHUB_CONFIG.username}/${GITHUB_CONFIG.repo}/contents/${GITHUB_CONFIG.folder}`;
+            const apiUrl = `https://api.github.com/repos/${GITHUB_CONFIG.username}/${GITHUB_CONFIG.repo}/contents/${GITHUB_CONFIG.photoFolder}`;
             const uploadBtnText = document.getElementById('upload-text');
             if(uploadBtnText) uploadBtnText.innerText = "⏳ 正在从云端获取照片...";
 
             try {
                 const response = await fetch(apiUrl);
                 if (!response.ok) throw new Error(`GitHub API Error: ${response.status}`);
-                
                 const data = await response.json();
                 
-                // Filter for image files
-                const imageFiles = data.filter(file => 
-                    file.type === 'file' && 
-                    /\.(jpg|jpeg|png|gif|webp)$/i.test(file.name)
-                );
+                const imageFiles = data.filter(file => file.type === 'file' && /\.(jpg|jpeg|png|gif|webp)$/i.test(file.name));
 
                 if (imageFiles.length === 0) {
-                    console.log("No images found in GitHub folder.");
                     if(uploadBtnText) uploadBtnText.innerText = "📷 上传额外照片";
                     return;
                 }
 
-                // Load each image
                 const loader = new THREE.TextureLoader();
-                // IMPORTANT: Enable cross-origin for GitHub raw images
                 loader.setCrossOrigin('anonymous'); 
 
                 const loadPromises = imageFiles.map(file => {
                     return new Promise((resolve) => {
-                        // Use download_url from API response
                         loader.load(file.download_url, (texture) => {
                             texture.colorSpace = THREE.SRGBColorSpace;
                             userPhotos.push(texture);
-                            
-                            // If this is the first batch, mark as user uploaded so we don't use defaults
                             hasUserUploaded = true;
-                            
-                            // Progressive update: update screen as images load
                             updatePhotoParticles();
                             resolve();
-                        }, undefined, (err) => {
-                            console.warn(`Failed to load ${file.name}`, err);
-                            resolve(); // Resolve anyway to continue
-                        });
+                        }, undefined, () => resolve());
                     });
                 });
 
                 await Promise.all(loadPromises);
-                
                 if(uploadBtnText) uploadBtnText.innerText = `✅ 已加载 ${userPhotos.length} 张云端照片`;
-                console.log(`Loaded ${userPhotos.length} photos from GitHub.`);
 
             } catch (error) {
-                console.warn("Could not load photos from GitHub (Rate limit or Repo not found):", error);
+                console.warn("Could not load photos from GitHub:", error);
                 if(uploadBtnText) uploadBtnText.innerText = "📷 上传照片 (云端加载失败)";
             }
         }
+
+        async function loadGitHubAudio() {
+            if (!GITHUB_CONFIG.enabled) return;
+            const apiUrl = `https://api.github.com/repos/${GITHUB_CONFIG.username}/${GITHUB_CONFIG.repo}/contents/${GITHUB_CONFIG.audioFolder}`;
+
+            try {
+                const response = await fetch(apiUrl);
+                if (!response.ok) throw new Error(`GitHub Audio API Error: ${response.status}`);
+                const data = await response.json();
+                
+                // Filter for audio files
+                const audioFiles = data.filter(file => file.type === 'file' && /\.(mp3|wav|ogg|m4a)$/i.test(file.name));
+
+                if (audioFiles.length > 0) {
+                    // Populate playlist
+                    audioPlaylist = audioFiles.map(f => f.download_url);
+                    console.log(`Loaded ${audioPlaylist.length} audio tracks from GitHub.`);
+                    // Update UI to show music is ready
+                    musicBtn.title = `已加载 ${audioPlaylist.length} 首歌曲，点击播放`;
+                } else {
+                    console.log("No audio files found in GitHub folder.");
+                }
+
+            } catch (error) {
+                console.warn("Could not load audio from GitHub:", error);
+            }
+        }
         
-        // Helper to refresh particles with new textures
         function updatePhotoParticles() {
             const photoParticles = particles.filter(p => p.isPhoto);
             if (photoParticles.length > 0 && userPhotos.length > 0) {
@@ -484,6 +568,51 @@
         }
 
         // --- Particle & Snow Systems ---
+
+        function createSnowGround() {
+            const geometry = new THREE.BufferGeometry();
+            const vertices = [];
+            const groundCount = 5000;
+            
+            for (let i = 0; i < groundCount; i++) {
+                const radius = 140 * Math.sqrt(Math.random()); 
+                const angle = Math.random() * 2 * Math.PI;
+                const x = Math.cos(angle) * radius;
+                const z = Math.sin(angle) * radius;
+                
+                let y = -28; 
+                const spiralWave = Math.sin(radius * 0.1 + angle * 2.5) * 6.0;
+                const roughness = (Math.random() - 0.5) * 1.5;
+                y += spiralWave + roughness;
+
+                vertices.push(x, y, z);
+            }
+            
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+            
+            const canvas = document.createElement('canvas');
+            canvas.width = 32; canvas.height = 32;
+            const ctx = canvas.getContext('2d');
+            const grad = ctx.createRadialGradient(16,16,0, 16,16,16);
+            grad.addColorStop(0, 'rgba(255, 255, 255, 0.5)'); 
+            grad.addColorStop(1, 'rgba(255, 255, 255, 0)');   
+            ctx.fillStyle = grad;
+            ctx.fillRect(0,0,32,32);
+            const tex = new THREE.CanvasTexture(canvas);
+
+            const material = new THREE.PointsMaterial({
+                color: 0xe0ffff, 
+                size: 2.5,       
+                map: tex,
+                transparent: true,
+                opacity: 0.3,    
+                depthWrite: false,
+                blending: THREE.AdditiveBlending
+            });
+
+            const groundSystem = new THREE.Points(geometry, material);
+            scene.add(groundSystem);
+        }
 
         function createSnowfall() {
             const geometry = new THREE.BufferGeometry();
@@ -566,11 +695,20 @@
                         
                         const treePos = new THREE.Vector3(pX, pY, 0); 
                         
-                        const scatterPos = new THREE.Vector3(
-                            (Math.random() - 0.5) * 150,
-                            (Math.random() - 0.5) * 150,
-                            (Math.random() - 0.5) * 150
-                        );
+                        // Modified: Use spherical distribution for text particles scatter
+                        // Radius ~70, Center Y~40
+                        const scatterRadius = 70;
+                        const u = Math.random();
+                        const v = Math.random();
+                        const theta = 2 * Math.PI * u;
+                        const phi = Math.acos(2 * v - 1);
+                        const r = scatterRadius * Math.cbrt(Math.random()); 
+                        
+                        const sx = r * Math.sin(phi) * Math.cos(theta);
+                        const sy = r * Math.sin(phi) * Math.sin(theta) + 40; 
+                        const sz = r * Math.cos(phi);
+                        
+                        const scatterPos = new THREE.Vector3(sx, sy, sz);
 
                         mesh.position.copy(treePos); 
                         scene.add(mesh);
@@ -578,7 +716,7 @@
                         particles.push({
                             mesh: mesh,
                             isPhoto: false,
-                            isText: true, // Mark as text particle for special rotation logic
+                            isText: true, 
                             treePos: treePos,
                             scatterPos: scatterPos,
                             randomRotation: new THREE.Vector3(Math.random()*0.02, Math.random()*0.02, 0),
@@ -619,11 +757,18 @@
                     Math.sin(angle) * radius
                 );
 
-                const scatterPos = new THREE.Vector3(
-                    (Math.random() - 0.5) * 120,
-                    (Math.random() - 0.5) * 100,
-                    (Math.random() - 0.5) * 120
-                );
+                const scatterRadius = 60;
+                const u = Math.random();
+                const v = Math.random();
+                const theta = 2 * Math.PI * u;
+                const phi = Math.acos(2 * v - 1);
+                const r = scatterRadius * Math.cbrt(Math.random());
+                
+                const sx = r * Math.sin(phi) * Math.cos(theta);
+                const sy = r * Math.sin(phi) * Math.sin(theta) + 20; 
+                const sz = r * Math.cos(phi);
+                
+                const scatterPos = new THREE.Vector3(sx, sy, sz);
 
                 mesh.position.copy(treePos);
                 scene.add(mesh);
@@ -634,7 +779,7 @@
                     treePos: treePos,
                     scatterPos: scatterPos,
                     randomRotation: new THREE.Vector3(Math.random()*0.1, Math.random()*0.1, 0),
-                    originalScale: mesh.scale.clone() // Fixed: Add missing originalScale property
+                    originalScale: mesh.scale.clone() 
                 });
             }
         }
@@ -684,12 +829,11 @@
 
                 if (randType < 0.05) {
                     isPhoto = true;
-                    // Use a placeholder material initially, will be updated by handleImageUpload if user uploads
+                    // Use a placeholder material initially
                     let tex, matPhoto;
                     
                     if (userPhotos.length > 0) {
                         tex = userPhotos[Math.floor(Math.random() * userPhotos.length)];
-                        // Photo material with NO emissive (for embedded/uploaded)
                         matPhoto = new THREE.MeshStandardMaterial({ 
                             map: tex, 
                             side: THREE.DoubleSide, 
@@ -699,7 +843,6 @@
                             emissiveIntensity: 0.0 
                         });
                     } else {
-                        // Fallback material if no photos available initially (shouldn't happen if using createDefaultTextures fallback)
                          matPhoto = new THREE.MeshStandardMaterial({ color: 0xffffff });
                     }
                     
@@ -719,11 +862,19 @@
                     }
                 }
 
-                const scatterPos = new THREE.Vector3(
-                    (Math.random() - 0.5) * 80,
-                    (Math.random() - 0.5) * 60 + 20,
-                    (Math.random() - 0.5) * 60
-                );
+                // Spherical scatter logic
+                const scatterRadius = 50;
+                const u = Math.random();
+                const v = Math.random();
+                const theta = 2 * Math.PI * u;
+                const phi = Math.acos(2 * v - 1);
+                const rScatter = scatterRadius * Math.cbrt(Math.random());
+                
+                const sx = rScatter * Math.sin(phi) * Math.cos(theta);
+                const sy = rScatter * Math.sin(phi) * Math.sin(theta) + 25; 
+                const sz = rScatter * Math.cos(phi);
+                
+                const scatterPos = new THREE.Vector3(sx, sy, sz);
 
                 const y = 60 * (1 - Math.sqrt(Math.random())); 
                 
@@ -798,7 +949,6 @@
             spriteMat.map = new THREE.CanvasTexture(canvas);
             
             const halo = new THREE.Sprite(spriteMat);
-            // Modified: Reduced halo scale from 15 to 10 for a tighter glow
             halo.scale.set(10, 10, 1);
             star.add(halo);
             scene.add(star);
@@ -1043,8 +1193,8 @@
                 targetCamPos.set(Math.sin(time * 0.2) * 100, 20, Math.cos(time * 0.2) * 100);
                 targetLookAt.set(0, 20, 0);
             } else if (appState === CONFIG.states.SCATTER) {
-                const camX = handState.x * 50; 
-                const camY = handState.y * 30 + 20;
+                const camX = handState.x * 150; 
+                const camY = handState.y * 100 + 20;
                 targetCamPos.set(Math.sin(time * 0.1) * 70 + camX, camY, Math.cos(time * 0.1) * 70);
                 targetLookAt.set(0, 20, 0);
             } else if (appState === CONFIG.states.ZOOM && zoomedParticleIndex !== -1) {
@@ -1063,15 +1213,11 @@
 
                 let targetPos;
                 
-                // NEW LOGIC FOR TEXT ROTATION: Make text face camera in TREE mode
                 if (p.isText && appState === CONFIG.states.TREE) {
-                     // Camera rotates around Y with angle = time * 0.2
-                     // To make text face camera, we rotate it by same angle around Y
                      const angle = time * 0.2;
                      const x = p.treePos.x;
                      const z = p.treePos.z;
                      
-                     // Standard rotation around Y axis
                      targetPos = new THREE.Vector3(
                         x * Math.cos(angle) + z * Math.sin(angle),
                         p.treePos.y,
@@ -1082,7 +1228,6 @@
                 }
 
                 if (appState !== CONFIG.states.TREE) {
-                    // Clone targetPos before modifying it if it's a reference to avoid side effects
                     if (!p.isText) { 
                          targetPos = targetPos.clone();
                     }
