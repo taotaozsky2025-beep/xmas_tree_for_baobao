@@ -221,8 +221,8 @@
             enabled: true,
             username: 'taotaozsky2025-beep', 
             repo: 'xmas_tree_for_baobao',    
-            photoFolder: 'photos', // 存放照片的文件夹
-            audioFolder: 'audio'   // 存放音乐的文件夹 (mp3, wav, etc.)
+            photoFolder: 'photos', 
+            audioFolder: 'audio'   
         };
 
         // --- Configuration ---
@@ -250,6 +250,8 @@
         let scene, camera, renderer, composer;
         let particles = []; 
         let snowParticlesSystem; 
+        // New Array for Fireworks
+        let fireworks = []; 
         let userPhotos = []; 
         let hasUserUploaded = false; 
         let appState = CONFIG.states.TREE;
@@ -257,12 +259,21 @@
         let time = 0;
         let zoomedParticleIndex = -1;
 
+        // Intro Animation State
+        const introState = {
+            active: true,
+            startTime: 0,
+            durationForm: 8000,   
+            durationHold: 5000,   
+            durationScatter: 2000 
+        };
+
         // Audio Variables
         let audioPlaylist = [];
         let currentTrackIndex = 0;
         let isMusicPlaying = false;
         const bgmAudio = new Audio();
-        bgmAudio.loop = false; // We handle looping manually for playlists
+        bgmAudio.loop = false; 
 
         // Interaction Variables
         let handState = {
@@ -296,13 +307,9 @@
             toggleMusic();
         });
 
-        // Attempt to play music on first interaction (required by browsers)
         window.addEventListener('click', () => {
             if (!isMusicPlaying && audioPlaylist.length > 0) {
-                // Only auto-play if we haven't started yet and have tracks
-                // We don't want to pause if user clicked to pause
-                // But initially, this helps start the audio context
-                // toggleMusic(); // Optional: uncomment if you want click-anywhere to play
+                // optional auto play logic
             }
         }, { once: true });
 
@@ -316,35 +323,31 @@
                 bgmAudio.pause();
                 isMusicPlaying = false;
                 musicBtn.classList.remove('playing');
-                musicBtn.innerHTML = '<span id="music-icon">🎵</span>'; // Stopped icon
+                musicBtn.innerHTML = '<span id="music-icon">🎵</span>'; 
             } else {
-                // If src is not set, set it
                 if (!bgmAudio.src) {
                     bgmAudio.src = audioPlaylist[currentTrackIndex];
                 }
                 bgmAudio.play().then(() => {
                     isMusicPlaying = true;
                     musicBtn.classList.add('playing');
-                    musicBtn.innerHTML = '<span id="music-icon" class="animate-spin">💿</span>'; // Playing icon
+                    musicBtn.innerHTML = '<span id="music-icon" class="animate-spin">💿</span>'; 
                 }).catch(err => {
                     console.warn("Audio play failed:", err);
                 });
             }
         }
 
-        // Handle Track Ending (Loop Playlist)
         bgmAudio.onended = () => {
             currentTrackIndex = (currentTrackIndex + 1) % audioPlaylist.length;
             bgmAudio.src = audioPlaylist[currentTrackIndex];
             bgmAudio.play().catch(console.error);
         };
 
-        // 监听网页可见性变化，自动恢复摄像头
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'visible') {
                 const video = document.getElementById('input_video');
                 if (video) {
-                    // 尝试恢复播放
                     video.play().catch(err => {
                         console.warn("自动恢复摄像头失败:", err);
                         if (video.srcObject && !video.srcObject.active) {
@@ -372,7 +375,6 @@
             renderer.toneMappingExposure = 1.2; 
             document.getElementById('canvas-container').appendChild(renderer.domElement);
 
-            // Lighting
             const ambientLight = new THREE.AmbientLight(0xffffff, 0.5); 
             scene.add(ambientLight);
 
@@ -386,7 +388,6 @@
             centerLight.position.set(0, 10, 0);
             scene.add(centerLight);
 
-            // Post Processing
             const renderScene = new RenderPass(scene, camera);
             const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.85);
             bloomPass.threshold = 0.15; 
@@ -397,10 +398,9 @@
             composer.addPass(renderScene);
             composer.addPass(bloomPass);
 
-            // Async Loads
             await Promise.all([
                 loadGitHubPhotos(),
-                loadGitHubAudio() // Load music
+                loadGitHubAudio()
             ]);
             
             if (userPhotos.length === 0) {
@@ -481,14 +481,11 @@
                 if (!response.ok) throw new Error(`GitHub Audio API Error: ${response.status}`);
                 const data = await response.json();
                 
-                // Filter for audio files
                 const audioFiles = data.filter(file => file.type === 'file' && /\.(mp3|wav|ogg|m4a)$/i.test(file.name));
 
                 if (audioFiles.length > 0) {
-                    // Populate playlist
                     audioPlaylist = audioFiles.map(f => f.download_url);
                     console.log(`Loaded ${audioPlaylist.length} audio tracks from GitHub.`);
-                    // Update UI to show music is ready
                     musicBtn.title = `已加载 ${audioPlaylist.length} 首歌曲，点击播放`;
                 } else {
                     console.log("No audio files found in GitHub folder.");
@@ -512,6 +509,139 @@
                     }
                 });
             }
+        }
+
+        // --- Firework Functions ---
+
+        function updateFireworks() {
+            // 1. Chance to launch a new firework (randomly)
+            if (Math.random() < 0.02) { // 2% chance per frame
+                 launchFirework();
+            }
+    
+            // 2. Update existing fireworks
+            for (let i = fireworks.length - 1; i >= 0; i--) {
+                const fw = fireworks[i];
+                
+                // Phase 1: Rocket (Going up)
+                if (fw.phase === 'rocket') {
+                    fw.mesh.position.add(fw.velocity);
+                    fw.velocity.y -= 0.05; // Gravity acting on rocket
+                    
+                    // Explode condition: when upward velocity is depleted or randomly near peak
+                    if (fw.velocity.y <= 0.5) {
+                        explodeFirework(fw, i);
+                    }
+                } 
+                // Phase 2: Particle (Explosion)
+                else if (fw.phase === 'particle') {
+                    const positions = fw.mesh.geometry.attributes.position.array;
+                    
+                    for(let j=0; j<fw.count; j++) {
+                        // Update individual particle positions
+                        positions[j*3] += fw.velocities[j].x;
+                        positions[j*3+1] += fw.velocities[j].y;
+                        positions[j*3+2] += fw.velocities[j].z;
+                        
+                        // Apply gravity and drag
+                        fw.velocities[j].y -= 0.03; // Gravity
+                        fw.velocities[j].multiplyScalar(0.96); // Air resistance
+                    }
+                    fw.mesh.geometry.attributes.position.needsUpdate = true;
+                    
+                    // Fade out
+                    fw.mesh.material.opacity -= 0.015;
+                    if (fw.mesh.material.opacity <= 0) {
+                        scene.remove(fw.mesh);
+                        fw.mesh.geometry.dispose();
+                        fireworks.splice(i, 1);
+                    }
+                }
+            }
+        }
+    
+        function launchFirework() {
+            // Create a single particle for the rocket
+            const geometry = new THREE.BufferGeometry();
+            // Start from background, below
+            const startX = (Math.random() - 0.5) * 200;
+            const startZ = -60 - Math.random() * 100; // Far background behind tree
+            const startY = -40;
+            
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0], 3));
+            
+            // Random vibrant color
+            const color = new THREE.Color().setHSL(Math.random(), 0.8, 0.6);
+            
+            const material = new THREE.PointsMaterial({ 
+                color: color, 
+                size: 3.0,
+                transparent: true,
+                blending: THREE.AdditiveBlending 
+            });
+    
+            const mesh = new THREE.Points(geometry, material);
+            mesh.position.set(startX, startY, startZ);
+            
+            scene.add(mesh);
+            
+            fireworks.push({
+                mesh: mesh,
+                phase: 'rocket',
+                velocity: new THREE.Vector3(0, 2.5 + Math.random(), 0), // Upward speed
+                color: color
+            });
+        }
+    
+        function explodeFirework(rocket, index) {
+            // 1. Remove rocket mesh
+            scene.remove(rocket.mesh);
+            rocket.mesh.geometry.dispose();
+            fireworks.splice(index, 1); // Remove from array
+    
+            // 2. Create explosion particles
+            const particleCount = 150;
+            const geometry = new THREE.BufferGeometry();
+            const positions = [];
+            const velocities = [];
+    
+            for(let i=0; i<particleCount; i++) {
+                positions.push(0, 0, 0); // All start from center of explosion
+                
+                // Sphere distribution for explosion
+                const r = 0.5 + Math.random() * 1.5; // Explosion speed variance
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.random() * Math.PI;
+                
+                velocities.push(new THREE.Vector3(
+                    r * Math.sin(phi) * Math.cos(theta),
+                    r * Math.sin(phi) * Math.sin(theta),
+                    r * Math.cos(phi)
+                ));
+            }
+            
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            
+            const material = new THREE.PointsMaterial({ 
+                color: rocket.color, 
+                size: 2.0,
+                transparent: true,
+                opacity: 1,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false
+            });
+    
+            const mesh = new THREE.Points(geometry, material);
+            mesh.position.copy(rocket.mesh.position); // Explosion happens where rocket died
+            scene.add(mesh);
+    
+            // Add new firework object in particle phase
+            fireworks.push({
+                mesh: mesh,
+                phase: 'particle',
+                count: particleCount,
+                velocities: velocities
+            });
         }
 
         // --- Custom Geometry Generators ---
@@ -572,17 +702,22 @@
         function createSnowGround() {
             const geometry = new THREE.BufferGeometry();
             const vertices = [];
-            const groundCount = 5000;
+            
+            const groundCount = 3000;
             
             for (let i = 0; i < groundCount; i++) {
                 const radius = 140 * Math.sqrt(Math.random()); 
                 const angle = Math.random() * 2 * Math.PI;
+                
                 const x = Math.cos(angle) * radius;
                 const z = Math.sin(angle) * radius;
                 
                 let y = -28; 
-                const spiralWave = Math.sin(radius * 0.1 + angle * 2.5) * 6.0;
+                
+                const spiralWave = Math.sin(radius * 0.1 + angle * 2.5) * 4.0;
+                
                 const roughness = (Math.random() - 0.5) * 1.5;
+
                 y += spiralWave + roughness;
 
                 vertices.push(x, y, z);
@@ -716,7 +851,7 @@
                         particles.push({
                             mesh: mesh,
                             isPhoto: false,
-                            isText: true, 
+                            isText: true, // Mark as text particle for special rotation logic
                             treePos: treePos,
                             scatterPos: scatterPos,
                             randomRotation: new THREE.Vector3(Math.random()*0.02, Math.random()*0.02, 0),
@@ -779,7 +914,7 @@
                     treePos: treePos,
                     scatterPos: scatterPos,
                     randomRotation: new THREE.Vector3(Math.random()*0.1, Math.random()*0.1, 0),
-                    originalScale: mesh.scale.clone() 
+                    originalScale: mesh.scale.clone() // Fixed: Add missing originalScale property
                 });
             }
         }
@@ -834,6 +969,7 @@
                     
                     if (userPhotos.length > 0) {
                         tex = userPhotos[Math.floor(Math.random() * userPhotos.length)];
+                        // Photo material with NO emissive (for embedded/uploaded)
                         matPhoto = new THREE.MeshStandardMaterial({ 
                             map: tex, 
                             side: THREE.DoubleSide, 
@@ -1146,6 +1282,8 @@
         }
 
         function onHandResults(results) {
+            if (introState.active) return;
+
             if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
                 const lm = results.multiHandLandmarks[0];
                 handState.x = (1 - lm[9].x) * 2 - 1;
@@ -1186,66 +1324,173 @@
 
         function animate() {
             requestAnimationFrame(animate);
+            
+            const now = Date.now();
+            if (introState.active && introState.startTime === 0) {
+                introState.startTime = now;
+            }
+
+            let introProgress = 0;
+            let currentIntroPhase = 'NONE'; 
+
+            if (introState.active) {
+                const elapsed = now - introState.startTime;
+                const tForm = introState.durationForm;
+                const tHold = tForm + introState.durationHold;
+                const tTotal = tHold + introState.durationScatter;
+
+                if (elapsed < tForm) {
+                    currentIntroPhase = 'FORM';
+                    introProgress = elapsed / tForm;
+                    introProgress = 1 - Math.pow(1 - introProgress, 3);
+                    document.getElementById('status-text').innerText = "正在汇聚星光...";
+                } else if (elapsed < tHold) {
+                    currentIntroPhase = 'HOLD';
+                    introProgress = 1;
+                    document.getElementById('status-text').innerText = "Merry Christmas!";
+                } else if (elapsed < tTotal) {
+                    currentIntroPhase = 'SCATTER';
+                    introProgress = (elapsed - tHold) / introState.durationScatter;
+                    introProgress = introProgress < 0.5 ? 2 * introProgress * introProgress : 1 - Math.pow(-2 * introProgress + 2, 2) / 2;
+                    document.getElementById('status-text').innerText = "礼花绽放...";
+                } else {
+                    introState.active = false;
+                    appState = CONFIG.states.SCATTER; 
+                    document.getElementById('status-text').innerText = "等待手势指令...";
+                }
+            }
+
             time += 0.01;
             let targetCamPos = new THREE.Vector3();
 
-            if (appState === CONFIG.states.TREE) {
-                targetCamPos.set(Math.sin(time * 0.2) * 100, 20, Math.cos(time * 0.2) * 100);
+            if (introState.active) {
+                if (currentIntroPhase === 'FORM' || currentIntroPhase === 'HOLD') {
+                    targetCamPos.set(Math.sin(time * 0.1) * 100, 20, Math.cos(time * 0.1) * 100);
+                } else {
+                    targetCamPos.set(Math.sin(time * 0.1) * 120, 30, Math.cos(time * 0.1) * 120);
+                }
                 targetLookAt.set(0, 20, 0);
-            } else if (appState === CONFIG.states.SCATTER) {
-                const camX = handState.x * 150; 
-                const camY = handState.y * 100 + 20;
-                targetCamPos.set(Math.sin(time * 0.1) * 70 + camX, camY, Math.cos(time * 0.1) * 70);
-                targetLookAt.set(0, 20, 0);
-            } else if (appState === CONFIG.states.ZOOM && zoomedParticleIndex !== -1) {
-                const p = particles[zoomedParticleIndex];
-                targetCamPos.set(p.mesh.position.x, p.mesh.position.y, p.mesh.position.z + 3.5);
-                targetLookAt.copy(p.mesh.position);
+            } else {
+                if (appState === CONFIG.states.TREE) {
+                    targetCamPos.set(Math.sin(time * 0.2) * 100, 20, Math.cos(time * 0.2) * 100);
+                    targetLookAt.set(0, 20, 0);
+                } else if (appState === CONFIG.states.SCATTER) {
+                    const camX = handState.x * 150; 
+                    const camY = handState.y * 100 + 20;
+                    targetCamPos.set(Math.sin(time * 0.1) * 70 + camX, camY, Math.cos(time * 0.1) * 70);
+                    targetLookAt.set(0, 20, 0);
+                } else if (appState === CONFIG.states.ZOOM && zoomedParticleIndex !== -1) {
+                    const p = particles[zoomedParticleIndex];
+                    targetCamPos.set(p.mesh.position.x, p.mesh.position.y, p.mesh.position.z + 3.5);
+                    targetLookAt.copy(p.mesh.position);
+                }
             }
+            
             camera.position.lerp(targetCamPos, 0.05);
             camera.lookAt(targetLookAt);
+
+            updateFireworks();
 
             particles.forEach((p, i) => {
                 if (!p.mesh || !p.mesh.scale) return; 
                 
                 if (!p.originalScale) p.originalScale = p.mesh.scale.clone();
                 if (!p.randomRotation) p.randomRotation = new THREE.Vector3(Math.random()*0.01, Math.random()*0.01, 0);
+                if (!p.introStartPos) {
+                    p.introStartPos = new THREE.Vector3(
+                        300 + Math.random() * 300, 
+                        50 + Math.random() * 100,  
+                        (Math.random() - 0.5) * 200 
+                    );
+                }
 
                 let targetPos;
                 
-                if (p.isText && appState === CONFIG.states.TREE) {
-                     const angle = time * 0.2;
-                     const x = p.treePos.x;
-                     const z = p.treePos.z;
-                     
-                     targetPos = new THREE.Vector3(
-                        x * Math.cos(angle) + z * Math.sin(angle),
-                        p.treePos.y,
-                        -x * Math.sin(angle) + z * Math.cos(angle)
-                     );
-                } else {
-                     targetPos = (appState === CONFIG.states.TREE) ? p.treePos : p.scatterPos;
-                }
+                if (introState.active) {
+                    if (currentIntroPhase === 'FORM') {
+                        const vStart = p.introStartPos;
+                        const angle = time * 0.2; 
+                        
+                        const rx = p.treePos.x * Math.cos(angle) + p.treePos.z * Math.sin(angle);
+                        const rz = -p.treePos.x * Math.sin(angle) + p.treePos.z * Math.cos(angle);
+                        
+                        let finalTreePos;
+                        if (p.isText) {
+                             const tx = p.treePos.x * Math.cos(angle) + p.treePos.z * Math.sin(angle);
+                             const tz = -p.treePos.x * Math.sin(angle) + p.treePos.z * Math.cos(angle);
+                             finalTreePos = new THREE.Vector3(tx, p.treePos.y, tz);
+                        } else {
+                             finalTreePos = new THREE.Vector3(rx, p.treePos.y, rz);
+                        }
 
-                if (appState !== CONFIG.states.TREE) {
-                    if (!p.isText) { 
-                         targetPos = targetPos.clone();
-                    }
-                    targetPos.add(new THREE.Vector3(Math.sin(time + i) * 2, Math.cos(time * 0.5 + i) * 2, 0));
-                    p.mesh.rotation.x += p.randomRotation.x;
-                    p.mesh.rotation.y += p.randomRotation.y;
-                } else {
-                    p.mesh.rotation.x *= 0.95; 
-                    p.mesh.rotation.z *= 0.95;
-                }
+                        p.mesh.position.lerpVectors(vStart, finalTreePos, introProgress);
 
-                if (appState === CONFIG.states.ZOOM && i === zoomedParticleIndex) {
-                    p.mesh.lookAt(camera.position);
-                } else {
-                    if (p.originalScale && p.mesh.scale.x > p.originalScale.x && appState !== CONFIG.states.ZOOM) {
-                         p.mesh.scale.lerp(p.originalScale, 0.05);
+                    } else if (currentIntroPhase === 'HOLD') {
+                        const angle = time * 0.2;
+                        
+                        if (p.isText) {
+                             const x = p.treePos.x;
+                             const z = p.treePos.z;
+                             targetPos = new THREE.Vector3(
+                                x * Math.cos(angle) + z * Math.sin(angle),
+                                p.treePos.y,
+                                -x * Math.sin(angle) + z * Math.cos(angle)
+                             );
+                        } else {
+                            const x = p.treePos.x;
+                            const z = p.treePos.z;
+                            targetPos = new THREE.Vector3(
+                                x * Math.cos(angle) - z * Math.sin(angle), 
+                                p.treePos.y,
+                                x * Math.sin(angle) + z * Math.cos(angle)
+                            );
+                        }
+                        p.mesh.position.lerp(targetPos, 0.1);
+
+                    } else if (currentIntroPhase === 'SCATTER') {
+                        const sx = p.scatterPos.x + Math.sin(time + i) * 10;
+                        const sy = p.scatterPos.y + Math.cos(time + i) * 10;
+                        const sz = p.scatterPos.z;
+                        const vScatter = new THREE.Vector3(sx, sy, sz);
+
+                        p.mesh.position.lerp(vScatter, 0.05); 
                     }
-                    p.mesh.position.lerp(targetPos, 0.03);
+
+                } else {
+                    if (p.isText && appState === CONFIG.states.TREE) {
+                         const angle = time * 0.2;
+                         const x = p.treePos.x;
+                         const z = p.treePos.z;
+                         
+                         targetPos = new THREE.Vector3(
+                            x * Math.cos(angle) + z * Math.sin(angle),
+                            p.treePos.y,
+                            -x * Math.sin(angle) + z * Math.cos(angle)
+                         );
+                    } else {
+                         targetPos = (appState === CONFIG.states.TREE) ? p.treePos : p.scatterPos;
+                    }
+
+                    if (appState !== CONFIG.states.TREE) {
+                        if (!p.isText) { 
+                             targetPos = targetPos.clone();
+                        }
+                        targetPos.add(new THREE.Vector3(Math.sin(time + i) * 2, Math.cos(time * 0.5 + i) * 2, 0));
+                        p.mesh.rotation.x += p.randomRotation.x;
+                        p.mesh.rotation.y += p.randomRotation.y;
+                    } else {
+                        p.mesh.rotation.x *= 0.95; 
+                        p.mesh.rotation.z *= 0.95;
+                    }
+
+                    if (appState === CONFIG.states.ZOOM && i === zoomedParticleIndex) {
+                        p.mesh.lookAt(camera.position);
+                    } else {
+                        if (p.originalScale && p.mesh.scale.x > p.originalScale.x && appState !== CONFIG.states.ZOOM) {
+                             p.mesh.scale.lerp(p.originalScale, 0.05);
+                        }
+                        p.mesh.position.lerp(targetPos, 0.03);
+                    }
                 }
             });
 
