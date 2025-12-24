@@ -49,6 +49,7 @@
             background: #000; color: #D4AF37; display: flex;
             flex-direction: column; justify-content: center; align-items: center;
             z-index: 50; transition: opacity 1s;
+            cursor: pointer; /* Changed to pointer to indicate clickability */
         }
 
         .ui-panel {
@@ -149,8 +150,8 @@
     <!-- Loading Screen -->
     <div id="loading">
         <div class="text-2xl font-bold tracking-widest mb-4 text-yellow-400" style="text-shadow: 0 0 15px #D4AF37;">Christmas Gift For 亲爱的宝包</div>
-        <div class="text-sm opacity-70">打开礼物中</div>
-        <div class="mt-4 w-48 h-1 bg-gray-800 rounded overflow-hidden">
+        <div id="loading-text" class="text-sm opacity-70 transition-all duration-300">打开礼物中</div>
+        <div id="loading-bar-container" class="mt-4 w-48 h-1 bg-gray-800 rounded overflow-hidden">
             <div id="progress-bar" class="h-full bg-yellow-500 w-0 transition-all duration-300"></div>
         </div>
     </div>
@@ -258,6 +259,7 @@
         let targetLookAt = new THREE.Vector3(0, 0, 0);
         let time = 0;
         let zoomedParticleIndex = -1;
+        let isExperienceStarted = false; // Flag to track if user clicked start
 
         // Intro Animation State
         const introState = {
@@ -306,12 +308,6 @@
         musicBtn.addEventListener('click', () => {
             toggleMusic();
         });
-
-        window.addEventListener('click', () => {
-            if (!isMusicPlaying && audioPlaylist.length > 0) {
-                // optional auto play logic
-            }
-        }, { once: true });
 
         function toggleMusic() {
             if (audioPlaylist.length === 0) {
@@ -419,11 +415,33 @@
             window.addEventListener('resize', onWindowResize);
             document.getElementById('image-upload').addEventListener('change', handleImageUpload);
 
+            // --- LOADING COMPLETE, WAIT FOR CLICK ---
             updateProgressBar(100);
-            setTimeout(() => {
+            const loadingText = document.getElementById('loading-text');
+            const loadingBar = document.getElementById('loading-bar-container');
+            
+            // Change text to invite interaction
+            loadingText.innerText = "🎁 点击屏幕拆开礼物";
+            loadingText.classList.add('text-xl', 'text-yellow-400', 'font-bold', 'animate-pulse');
+            loadingBar.style.display = 'none'; // Hide progress bar
+
+            // One-time click handler to start everything
+            const startExperience = () => {
+                if (isExperienceStarted) return;
+                isExperienceStarted = true;
+
+                // Play music if available
+                if (audioPlaylist.length > 0) {
+                    toggleMusic();
+                }
+
+                // Hide loading screen
                 loadingScreen.style.opacity = 0;
                 setTimeout(() => loadingScreen.remove(), 1000);
-            }, 500);
+            };
+
+            loadingScreen.addEventListener('click', startExperience);
+            loadingScreen.addEventListener('touchstart', startExperience);
 
             animate();
         }
@@ -830,18 +848,17 @@
                         
                         const treePos = new THREE.Vector3(pX, pY, 0); 
                         
-                        // Modified: Use spherical distribution for text particles scatter
-                        // Radius ~70, Center Y~40
-                        const scatterRadius = 70;
+                        // Modified: Spherical scatter distribution for text particles
+                        const scatterRadius = 80;
                         const u = Math.random();
                         const v = Math.random();
                         const theta = 2 * Math.PI * u;
                         const phi = Math.acos(2 * v - 1);
-                        const r = scatterRadius * Math.cbrt(Math.random()); 
+                        const rScatter = scatterRadius * Math.cbrt(Math.random());
                         
-                        const sx = r * Math.sin(phi) * Math.cos(theta);
-                        const sy = r * Math.sin(phi) * Math.sin(theta) + 40; 
-                        const sz = r * Math.cos(phi);
+                        const sx = rScatter * Math.sin(phi) * Math.cos(theta);
+                        const sy = rScatter * Math.sin(phi) * Math.sin(theta) + 30; // Center Y around 30
+                        const sz = rScatter * Math.cos(phi);
                         
                         const scatterPos = new THREE.Vector3(sx, sy, sz);
 
@@ -892,16 +909,17 @@
                     Math.sin(angle) * radius
                 );
 
-                const scatterRadius = 60;
+                // Modified: Spherical scatter distribution for light strip
+                const scatterRadius = 70;
                 const u = Math.random();
                 const v = Math.random();
                 const theta = 2 * Math.PI * u;
                 const phi = Math.acos(2 * v - 1);
-                const r = scatterRadius * Math.cbrt(Math.random());
+                const rScatter = scatterRadius * Math.cbrt(Math.random());
                 
-                const sx = r * Math.sin(phi) * Math.cos(theta);
-                const sy = r * Math.sin(phi) * Math.sin(theta) + 20; 
-                const sz = r * Math.cos(phi);
+                const sx = rScatter * Math.sin(phi) * Math.cos(theta);
+                const sy = rScatter * Math.sin(phi) * Math.sin(theta) + 20; 
+                const sz = rScatter * Math.cos(phi);
                 
                 const scatterPos = new THREE.Vector3(sx, sy, sz);
 
@@ -964,7 +982,7 @@
 
                 if (randType < 0.05) {
                     isPhoto = true;
-                    // Use a placeholder material initially
+                    // Use a placeholder material initially, will be updated by handleImageUpload if user uploads
                     let tex, matPhoto;
                     
                     if (userPhotos.length > 0) {
@@ -975,10 +993,11 @@
                             side: THREE.DoubleSide, 
                             roughness: 0.6, 
                             metalness: 0.0,
-                            emissive: 0x000000, 
+                            emissive: 0x000000, // Black emissive = no self-glow
                             emissiveIntensity: 0.0 
                         });
                     } else {
+                        // Fallback material if no photos available initially (shouldn't happen if using createDefaultTextures fallback)
                          matPhoto = new THREE.MeshStandardMaterial({ color: 0xffffff });
                     }
                     
@@ -998,8 +1017,8 @@
                     }
                 }
 
-                // Spherical scatter logic
-                const scatterRadius = 50;
+                // Modified: Spherical scatter distribution for main particles
+                const scatterRadius = 65;
                 const u = Math.random();
                 const v = Math.random();
                 const theta = 2 * Math.PI * u;
@@ -1007,7 +1026,7 @@
                 const rScatter = scatterRadius * Math.cbrt(Math.random());
                 
                 const sx = rScatter * Math.sin(phi) * Math.cos(theta);
-                const sy = rScatter * Math.sin(phi) * Math.sin(theta) + 25; 
+                const sy = rScatter * Math.sin(phi) * Math.sin(theta) + 20; // Center around Y=20
                 const sz = rScatter * Math.cos(phi);
                 
                 const scatterPos = new THREE.Vector3(sx, sy, sz);
@@ -1036,7 +1055,7 @@
                     treePos: treePos,
                     scatterPos: scatterPos,
                     randomRotation: new THREE.Vector3(Math.random()*0.02, Math.random()*0.02, Math.random()*0.02),
-                    originalScale: mesh.scale.clone() 
+                    originalScale: mesh.scale.clone() // Store original scale for pulse effect
                 });
             }
         }
@@ -1085,6 +1104,7 @@
             spriteMat.map = new THREE.CanvasTexture(canvas);
             
             const halo = new THREE.Sprite(spriteMat);
+            // Modified: Reduced halo scale from 15 to 10 for a tighter glow
             halo.scale.set(10, 10, 1);
             star.add(halo);
             scene.add(star);
@@ -1282,8 +1302,6 @@
         }
 
         function onHandResults(results) {
-            if (introState.active) return;
-
             if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
                 const lm = results.multiHandLandmarks[0];
                 handState.x = (1 - lm[9].x) * 2 - 1;
@@ -1324,16 +1342,20 @@
 
         function animate() {
             requestAnimationFrame(animate);
-            
-            const now = Date.now();
-            if (introState.active && introState.startTime === 0) {
-                introState.startTime = now;
-            }
-
-            let introProgress = 0;
-            let currentIntroPhase = 'NONE'; 
+            time += 0.01;
+            let targetCamPos = new THREE.Vector3();
 
             if (introState.active) {
+                if (!isExperienceStarted) return; 
+                
+                const now = Date.now();
+                if (introState.startTime === 0) {
+                    introState.startTime = now;
+                }
+                
+                let introProgress = 0;
+                let currentIntroPhase = 'NONE'; 
+
                 const elapsed = now - introState.startTime;
                 const tForm = introState.durationForm;
                 const tHold = tForm + introState.durationHold;
@@ -1358,55 +1380,30 @@
                     appState = CONFIG.states.SCATTER; 
                     document.getElementById('status-text').innerText = "等待手势指令...";
                 }
-            }
 
-            time += 0.01;
-            let targetCamPos = new THREE.Vector3();
-
-            if (introState.active) {
                 if (currentIntroPhase === 'FORM' || currentIntroPhase === 'HOLD') {
                     targetCamPos.set(Math.sin(time * 0.1) * 100, 20, Math.cos(time * 0.1) * 100);
                 } else {
                     targetCamPos.set(Math.sin(time * 0.1) * 120, 30, Math.cos(time * 0.1) * 120);
                 }
                 targetLookAt.set(0, 20, 0);
-            } else {
-                if (appState === CONFIG.states.TREE) {
-                    targetCamPos.set(Math.sin(time * 0.2) * 100, 20, Math.cos(time * 0.2) * 100);
-                    targetLookAt.set(0, 20, 0);
-                } else if (appState === CONFIG.states.SCATTER) {
-                    const camX = handState.x * 150; 
-                    const camY = handState.y * 100 + 20;
-                    targetCamPos.set(Math.sin(time * 0.1) * 70 + camX, camY, Math.cos(time * 0.1) * 70);
-                    targetLookAt.set(0, 20, 0);
-                } else if (appState === CONFIG.states.ZOOM && zoomedParticleIndex !== -1) {
-                    const p = particles[zoomedParticleIndex];
-                    targetCamPos.set(p.mesh.position.x, p.mesh.position.y, p.mesh.position.z + 3.5);
-                    targetLookAt.copy(p.mesh.position);
-                }
-            }
-            
-            camera.position.lerp(targetCamPos, 0.05);
-            camera.lookAt(targetLookAt);
-
-            updateFireworks();
-
-            particles.forEach((p, i) => {
-                if (!p.mesh || !p.mesh.scale) return; 
                 
-                if (!p.originalScale) p.originalScale = p.mesh.scale.clone();
-                if (!p.randomRotation) p.randomRotation = new THREE.Vector3(Math.random()*0.01, Math.random()*0.01, 0);
-                if (!p.introStartPos) {
-                    p.introStartPos = new THREE.Vector3(
-                        300 + Math.random() * 300, 
-                        50 + Math.random() * 100,  
-                        (Math.random() - 0.5) * 200 
-                    );
-                }
+                // Particle Animation during intro
+                particles.forEach((p, i) => {
+                    if (!p.mesh || !p.mesh.scale) return; 
+                    
+                    if (!p.originalScale) p.originalScale = p.mesh.scale.clone();
+                    if (!p.randomRotation) p.randomRotation = new THREE.Vector3(Math.random()*0.01, Math.random()*0.01, 0);
+                    if (!p.introStartPos) {
+                        p.introStartPos = new THREE.Vector3(
+                            300 + Math.random() * 300, 
+                            50 + Math.random() * 100,  
+                            (Math.random() - 0.5) * 200 
+                        );
+                    }
 
-                let targetPos;
-                
-                if (introState.active) {
+                    let targetPos;
+                    
                     if (currentIntroPhase === 'FORM') {
                         const vStart = p.introStartPos;
                         const angle = time * 0.2; 
@@ -1416,11 +1413,11 @@
                         
                         let finalTreePos;
                         if (p.isText) {
-                             const tx = p.treePos.x * Math.cos(angle) + p.treePos.z * Math.sin(angle);
-                             const tz = -p.treePos.x * Math.sin(angle) + p.treePos.z * Math.cos(angle);
-                             finalTreePos = new THREE.Vector3(tx, p.treePos.y, tz);
+                                const tx = p.treePos.x * Math.cos(angle) + p.treePos.z * Math.sin(angle);
+                                const tz = -p.treePos.x * Math.sin(angle) + p.treePos.z * Math.cos(angle);
+                                finalTreePos = new THREE.Vector3(tx, p.treePos.y, tz);
                         } else {
-                             finalTreePos = new THREE.Vector3(rx, p.treePos.y, rz);
+                                finalTreePos = new THREE.Vector3(rx, p.treePos.y, rz);
                         }
 
                         p.mesh.position.lerpVectors(vStart, finalTreePos, introProgress);
@@ -1429,13 +1426,13 @@
                         const angle = time * 0.2;
                         
                         if (p.isText) {
-                             const x = p.treePos.x;
-                             const z = p.treePos.z;
-                             targetPos = new THREE.Vector3(
+                                const x = p.treePos.x;
+                                const z = p.treePos.z;
+                                targetPos = new THREE.Vector3(
                                 x * Math.cos(angle) + z * Math.sin(angle),
                                 p.treePos.y,
                                 -x * Math.sin(angle) + z * Math.cos(angle)
-                             );
+                                );
                         } else {
                             const x = p.treePos.x;
                             const z = p.treePos.z;
@@ -1455,25 +1452,52 @@
 
                         p.mesh.position.lerp(vScatter, 0.05); 
                     }
+                });
 
-                } else {
+            } else {
+                // Normal Interaction Logic
+                if (appState === CONFIG.states.TREE) {
+                    targetCamPos.set(Math.sin(time * 0.2) * 100, 20, Math.cos(time * 0.2) * 100);
+                    targetLookAt.set(0, 20, 0);
+                } else if (appState === CONFIG.states.SCATTER) {
+                    const camX = handState.x * 150; 
+                    const camY = handState.y * 100 + 20;
+                    targetCamPos.set(Math.sin(time * 0.1) * 70 + camX, camY, Math.cos(time * 0.1) * 70);
+                    targetLookAt.set(0, 20, 0);
+                } else if (appState === CONFIG.states.ZOOM && zoomedParticleIndex !== -1) {
+                    const p = particles[zoomedParticleIndex];
+                    targetCamPos.set(p.mesh.position.x, p.mesh.position.y, p.mesh.position.z + 3.5);
+                    targetLookAt.copy(p.mesh.position);
+                }
+
+                camera.position.lerp(targetCamPos, 0.05);
+                camera.lookAt(targetLookAt);
+
+                particles.forEach((p, i) => {
+                    if (!p.mesh || !p.mesh.scale) return; 
+                    
+                    if (!p.originalScale) p.originalScale = p.mesh.scale.clone();
+                    if (!p.randomRotation) p.randomRotation = new THREE.Vector3(Math.random()*0.01, Math.random()*0.01, 0);
+
+                    let targetPos;
+                    
                     if (p.isText && appState === CONFIG.states.TREE) {
-                         const angle = time * 0.2;
-                         const x = p.treePos.x;
-                         const z = p.treePos.z;
-                         
-                         targetPos = new THREE.Vector3(
+                            const angle = time * 0.2;
+                            const x = p.treePos.x;
+                            const z = p.treePos.z;
+                            
+                            targetPos = new THREE.Vector3(
                             x * Math.cos(angle) + z * Math.sin(angle),
                             p.treePos.y,
                             -x * Math.sin(angle) + z * Math.cos(angle)
-                         );
+                            );
                     } else {
-                         targetPos = (appState === CONFIG.states.TREE) ? p.treePos : p.scatterPos;
+                            targetPos = (appState === CONFIG.states.TREE) ? p.treePos : p.scatterPos;
                     }
 
                     if (appState !== CONFIG.states.TREE) {
                         if (!p.isText) { 
-                             targetPos = targetPos.clone();
+                                targetPos = targetPos.clone();
                         }
                         targetPos.add(new THREE.Vector3(Math.sin(time + i) * 2, Math.cos(time * 0.5 + i) * 2, 0));
                         p.mesh.rotation.x += p.randomRotation.x;
@@ -1487,13 +1511,16 @@
                         p.mesh.lookAt(camera.position);
                     } else {
                         if (p.originalScale && p.mesh.scale.x > p.originalScale.x && appState !== CONFIG.states.ZOOM) {
-                             p.mesh.scale.lerp(p.originalScale, 0.05);
+                                p.mesh.scale.lerp(p.originalScale, 0.05);
                         }
                         p.mesh.position.lerp(targetPos, 0.03);
                     }
-                }
-            });
-
+                });
+            }
+            
+            // Background Effects always run
+            updateFireworks();
+            
             if (snowParticlesSystem) {
                 const positions = snowParticlesSystem.geometry.attributes.position.array;
                 for (let i = 1; i < positions.length; i += 3) {
