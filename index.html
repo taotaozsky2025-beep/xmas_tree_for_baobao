@@ -167,7 +167,7 @@
             </ul>
             
             <label id="upload-btn" class="w-full mb-2 block mt-4">
-                <span id="upload-text">📷 上传照片 (生成照片云)</span>
+                <span id="upload-text">📷 上传额外照片</span>
                 <input type="file" id="image-upload" multiple accept="image/*">
             </label>
         </div>
@@ -194,6 +194,20 @@
         import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
         import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 
+        // ==========================================================================
+        //  GitHub 自动加载配置
+        //  请确保你的仓库是 Public (公开) 的，否则 API 无法读取
+        // ==========================================================================
+        const GITHUB_CONFIG = {
+            enabled: true,
+            // 你的 GitHub 用户名 (根据你的文件路径推测)
+            username: 'taotaozsky2025-beep', 
+            // 你的 仓库名 (根据你的文件路径推测)
+            repo: 'xmas_tree_for_baobao',    
+            // 存放照片的文件夹名称，请在仓库根目录下创建这个文件夹
+            folder: 'photos'           
+        };
+
         // --- Configuration ---
         const CONFIG = {
             colors: {
@@ -205,8 +219,8 @@
                 warmWhite: 0xFFF5E1
             },
             particles: {
-                count: 3200, // Increased density
-                snowCount: 800 // More snow
+                count: 3200, 
+                snowCount: 800 
             },
             states: {
                 TREE: 'tree',
@@ -257,10 +271,9 @@
             if (document.visibilityState === 'visible') {
                 const video = document.getElementById('input_video');
                 if (video) {
-                    // 尝试恢复播放，解决手机切后台或选文件后卡顿问题
+                    // 尝试恢复播放
                     video.play().catch(err => {
                         console.warn("自动恢复摄像头失败:", err);
-                        // 如果因为流断开导致无法播放，可能需要刷新页面
                         if (video.srcObject && !video.srcObject.active) {
                             statusText.innerText = "摄像头连接中断，请刷新页面";
                         }
@@ -274,7 +287,6 @@
             scene = new THREE.Scene();
             scene.background = new THREE.Color(CONFIG.colors.bg);
             
-            // Keep fog low for distance visibility
             scene.fog = new THREE.FogExp2(CONFIG.colors.bg, 0.002);
 
             camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -283,13 +295,12 @@
             renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.setPixelRatio(window.devicePixelRatio);
-            // Use ACES Filmic for better HDR handling
             renderer.toneMapping = THREE.ACESFilmicToneMapping;
             renderer.toneMappingExposure = 1.2; 
             document.getElementById('canvas-container').appendChild(renderer.domElement);
 
             // Lighting
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.3); // White ambient to support true colors
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5); 
             scene.add(ambientLight);
 
             const spotLight = new THREE.SpotLight(CONFIG.colors.gold, 1000);
@@ -313,10 +324,17 @@
             composer.addPass(renderScene);
             composer.addPass(bloomPass);
 
-            createDefaultTextures();
+            // 1. Try to load photos from GitHub first
+            await loadGitHubPhotos();
+            
+            // 2. If no photos loaded (API limit or empty folder), create default placeholders
+            if (userPhotos.length === 0) {
+                createDefaultTextures();
+            }
+
             createParticles();
             createLightStrip(); 
-            createTextParticles(); // Create text particles for Cheryl
+            createTextParticles(); 
             createSnowfall();
             createTopStar();
 
@@ -332,6 +350,84 @@
             }, 500);
 
             animate();
+        }
+
+        // --- GitHub Photo Loading Logic ---
+        async function loadGitHubPhotos() {
+            if (!GITHUB_CONFIG.enabled) return;
+
+            const apiUrl = `https://api.github.com/repos/${GITHUB_CONFIG.username}/${GITHUB_CONFIG.repo}/contents/${GITHUB_CONFIG.folder}`;
+            const uploadBtnText = document.getElementById('upload-text');
+            if(uploadBtnText) uploadBtnText.innerText = "⏳ 正在从云端获取照片...";
+
+            try {
+                const response = await fetch(apiUrl);
+                if (!response.ok) throw new Error(`GitHub API Error: ${response.status}`);
+                
+                const data = await response.json();
+                
+                // Filter for image files
+                const imageFiles = data.filter(file => 
+                    file.type === 'file' && 
+                    /\.(jpg|jpeg|png|gif|webp)$/i.test(file.name)
+                );
+
+                if (imageFiles.length === 0) {
+                    console.log("No images found in GitHub folder.");
+                    if(uploadBtnText) uploadBtnText.innerText = "📷 上传额外照片";
+                    return;
+                }
+
+                // Load each image
+                const loader = new THREE.TextureLoader();
+                // IMPORTANT: Enable cross-origin for GitHub raw images
+                loader.setCrossOrigin('anonymous'); 
+
+                const loadPromises = imageFiles.map(file => {
+                    return new Promise((resolve) => {
+                        // Use download_url from API response
+                        loader.load(file.download_url, (texture) => {
+                            texture.colorSpace = THREE.SRGBColorSpace;
+                            userPhotos.push(texture);
+                            
+                            // If this is the first batch, mark as user uploaded so we don't use defaults
+                            hasUserUploaded = true;
+                            
+                            // Progressive update: update screen as images load
+                            updatePhotoParticles();
+                            resolve();
+                        }, undefined, (err) => {
+                            console.warn(`Failed to load ${file.name}`, err);
+                            resolve(); // Resolve anyway to continue
+                        });
+                    });
+                });
+
+                await Promise.all(loadPromises);
+                
+                if(uploadBtnText) uploadBtnText.innerText = `✅ 已加载 ${userPhotos.length} 张云端照片`;
+                console.log(`Loaded ${userPhotos.length} photos from GitHub.`);
+
+            } catch (error) {
+                console.warn("Could not load photos from GitHub (Rate limit or Repo not found):", error);
+                if(uploadBtnText) uploadBtnText.innerText = "📷 上传照片 (云端加载失败)";
+            }
+        }
+        
+        // Helper to refresh particles with new textures
+        function updatePhotoParticles() {
+            const photoParticles = particles.filter(p => p.isPhoto);
+            if (photoParticles.length > 0 && userPhotos.length > 0) {
+                photoParticles.forEach((p, index) => {
+                    if (!p.mesh || !p.mesh.material) return;
+                    
+                    const newTex = userPhotos[index % userPhotos.length];
+                    if (p.mesh.material.map !== newTex) {
+                        p.mesh.material.map = newTex;
+                        p.mesh.material.needsUpdate = true;
+                    }
+                });
+            }
         }
 
         // --- Custom Geometry Generators ---
@@ -435,7 +531,7 @@
 
             // Style text
             ctx.fillStyle = '#FFFFFF';
-            ctx.font = 'bold 80px "Segoe UI", serif'; // Serif font looks nice for holidays
+            ctx.font = 'bold 80px "Segoe UI", serif'; 
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             
@@ -454,17 +550,14 @@
                 metalness: 0.8
             });
             
-            const geo = new THREE.SphereGeometry(0.35, 8, 8); // Dots for text
+            const geo = new THREE.SphereGeometry(0.12, 8, 8); 
 
             // Scan pixels
-            const step = 7; // Sampling step
+            const step = 3; 
             for (let y = 0; y < canvas.height; y += step) {
                 for (let x = 0; x < canvas.width; x += step) {
                     const index = (y * canvas.width + x) * 4;
                     if (data[index + 3] > 128) { // If pixel is visible
-                        // Map 2D to 3D
-                        // x: 0..1024 -> -50..50
-                        // y: 0..512 -> 80..40 (flipped and shifted up)
                         
                         const pX = (x - canvas.width / 2) * 0.12; 
                         const pY = 85 - (y * 0.12); // Position above tree (star is at 42)
@@ -485,6 +578,7 @@
                         particles.push({
                             mesh: mesh,
                             isPhoto: false,
+                            isText: true, // Mark as text particle for special rotation logic
                             treePos: treePos,
                             scatterPos: scatterPos,
                             randomRotation: new THREE.Vector3(Math.random()*0.02, Math.random()*0.02, 0),
@@ -591,11 +685,24 @@
                 if (randType < 0.05) {
                     isPhoto = true;
                     // Use a placeholder material initially, will be updated by handleImageUpload if user uploads
-                    const tex = userPhotos[Math.floor(Math.random() * userPhotos.length)];
-                    const matPhoto = new THREE.MeshStandardMaterial({ 
-                        map: tex, side: THREE.DoubleSide, roughness: 0.2,
-                        emissive: 0xffffff, emissiveIntensity: 0.1 
-                    });
+                    let tex, matPhoto;
+                    
+                    if (userPhotos.length > 0) {
+                        tex = userPhotos[Math.floor(Math.random() * userPhotos.length)];
+                        // Photo material with NO emissive (for embedded/uploaded)
+                        matPhoto = new THREE.MeshStandardMaterial({ 
+                            map: tex, 
+                            side: THREE.DoubleSide, 
+                            roughness: 0.6, 
+                            metalness: 0.0,
+                            emissive: 0x000000, 
+                            emissiveIntensity: 0.0 
+                        });
+                    } else {
+                        // Fallback material if no photos available initially (shouldn't happen if using createDefaultTextures fallback)
+                         matPhoto = new THREE.MeshStandardMaterial({ color: 0xffffff });
+                    }
+                    
                     mesh = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 2.4), matPhoto);
                 } 
                 else if (randType < 0.80) {
@@ -642,7 +749,7 @@
                     treePos: treePos,
                     scatterPos: scatterPos,
                     randomRotation: new THREE.Vector3(Math.random()*0.02, Math.random()*0.02, Math.random()*0.02),
-                    originalScale: mesh.scale.clone() // Store original scale for pulse effect
+                    originalScale: mesh.scale.clone() 
                 });
             }
         }
@@ -713,15 +820,11 @@
             const originalText = "📷 上传照片 (生成照片云)";
             if(btnText) btnText.innerText = "⏳ 处理中...";
 
-            // Clear defaults if first upload
             if (!hasUserUploaded) {
                 userPhotos = []; 
                 hasUserUploaded = true; 
             }
 
-            // --- REFACTORED UPLOAD LOGIC ---
-            // Use URL.createObjectURL + TextureLoader for better reliability
-            
             const loader = new THREE.TextureLoader();
             const promises = Array.from(files).map(file => {
                 return new Promise((resolve, reject) => {
@@ -731,34 +834,30 @@
                             texture.colorSpace = THREE.SRGBColorSpace;
                             userPhotos.push(texture);
                             
-                            // Progressive Update: Update scene immediately when a single photo loads
                             updatePhotoParticles();
                             
-                            URL.revokeObjectURL(url); // Cleanup
+                            URL.revokeObjectURL(url); 
                             resolve(texture);
                         }, 
                         undefined, 
                         (err) => {
                             console.error("Texture load failed", err);
-                            resolve(null); // Resolve anyway to not block Promise.all
+                            resolve(null); 
                         }
                     );
                 });
             });
 
-            // Helper to update scene
             function updatePhotoParticles() {
                 const photoParticles = particles.filter(p => p.isPhoto);
                 if (photoParticles.length > 0 && userPhotos.length > 0) {
                     photoParticles.forEach((p, index) => {
                         if (!p.mesh || !p.mesh.material) return;
                         
-                        // Assign random photo from userPhotos
                         const newTex = userPhotos[index % userPhotos.length];
                         if (p.mesh.material.map !== newTex) {
                             p.mesh.material.map = newTex;
                             p.mesh.material.needsUpdate = true;
-                            // Visual Pop
                             if(p.mesh.scale) p.mesh.scale.set(4.0, 4.0, 4.0);
                         }
                     });
@@ -769,7 +868,6 @@
                 if(btnText) btnText.innerText = originalText;
                 alert(`成功！${files.length} 张照片已上树！`);
                 
-                // FORCE resume camera on mobile after upload completes
                 setTimeout(() => {
                     const video = document.getElementById('input_video');
                     if (video && video.paused) {
@@ -793,7 +891,6 @@
             const canvasElement = document.getElementById('output_canvas');
             const canvasCtx = canvasElement.getContext('2d');
 
-            // Set canvas size to match video
             videoElement.addEventListener('loadeddata', () => {
                 canvasElement.width = videoElement.videoWidth;
                 canvasElement.height = videoElement.videoHeight;
@@ -805,7 +902,6 @@
                 hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
                 
                 hands.onResults((results) => {
-                    // Draw landmarks for feedback
                     canvasCtx.save();
                     canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
                     if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
@@ -902,7 +998,6 @@
         function onHandResults(results) {
             if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
                 const lm = results.multiHandLandmarks[0];
-                // Mirror x coordinate because video is mirrored
                 handState.x = (1 - lm[9].x) * 2 - 1;
                 handState.y = -(lm[9].y * 2 - 1);
                 
@@ -914,7 +1009,6 @@
                     zoomedParticleIndex = -1;
                     updateStatus('TREE', '合拢态 (圣诞树)');
                 } else if (gesture === 'OPEN') {
-                    // MODIFIED: Always allow transition to SCATTER if gesture is OPEN
                     if (appState !== CONFIG.states.SCATTER) {
                         appState = CONFIG.states.SCATTER;
                         zoomedParticleIndex = -1;
@@ -927,9 +1021,6 @@
                     }
                     updateStatus('ZOOM', '照片放大态');
                 }
-            } else {
-                // Optional: handle no hand detected
-                // updateStatus(appState, '未检测到手势');
             }
         }
 
@@ -948,7 +1039,6 @@
             time += 0.01;
             let targetCamPos = new THREE.Vector3();
 
-            // 1. Camera Logic
             if (appState === CONFIG.states.TREE) {
                 targetCamPos.set(Math.sin(time * 0.2) * 100, 20, Math.cos(time * 0.2) * 100);
                 targetLookAt.set(0, 20, 0);
@@ -959,25 +1049,44 @@
                 targetLookAt.set(0, 20, 0);
             } else if (appState === CONFIG.states.ZOOM && zoomedParticleIndex !== -1) {
                 const p = particles[zoomedParticleIndex];
-                targetCamPos.set(p.mesh.position.x, p.mesh.position.y, p.mesh.position.z + 15);
+                targetCamPos.set(p.mesh.position.x, p.mesh.position.y, p.mesh.position.z + 3.5);
                 targetLookAt.copy(p.mesh.position);
             }
             camera.position.lerp(targetCamPos, 0.05);
             camera.lookAt(targetLookAt);
 
-            // 2. Main Particle Animation
             particles.forEach((p, i) => {
-                // --- Safety Checks (Enhanced) ---
-                if (!p.mesh || !p.mesh.scale) return; // Skip if particle is malformed
+                if (!p.mesh || !p.mesh.scale) return; 
                 
-                // Initialize potentially undefined properties to prevent crashes
                 if (!p.originalScale) p.originalScale = p.mesh.scale.clone();
                 if (!p.randomRotation) p.randomRotation = new THREE.Vector3(Math.random()*0.01, Math.random()*0.01, 0);
-                // ---------------------
 
-                let targetPos = (appState === CONFIG.states.TREE) ? p.treePos : p.scatterPos;
+                let targetPos;
+                
+                // NEW LOGIC FOR TEXT ROTATION: Make text face camera in TREE mode
+                if (p.isText && appState === CONFIG.states.TREE) {
+                     // Camera rotates around Y with angle = time * 0.2
+                     // To make text face camera, we rotate it by same angle around Y
+                     const angle = time * 0.2;
+                     const x = p.treePos.x;
+                     const z = p.treePos.z;
+                     
+                     // Standard rotation around Y axis
+                     targetPos = new THREE.Vector3(
+                        x * Math.cos(angle) + z * Math.sin(angle),
+                        p.treePos.y,
+                        -x * Math.sin(angle) + z * Math.cos(angle)
+                     );
+                } else {
+                     targetPos = (appState === CONFIG.states.TREE) ? p.treePos : p.scatterPos;
+                }
+
                 if (appState !== CONFIG.states.TREE) {
-                    targetPos = targetPos.clone().add(new THREE.Vector3(Math.sin(time + i) * 2, Math.cos(time * 0.5 + i) * 2, 0));
+                    // Clone targetPos before modifying it if it's a reference to avoid side effects
+                    if (!p.isText) { 
+                         targetPos = targetPos.clone();
+                    }
+                    targetPos.add(new THREE.Vector3(Math.sin(time + i) * 2, Math.cos(time * 0.5 + i) * 2, 0));
                     p.mesh.rotation.x += p.randomRotation.x;
                     p.mesh.rotation.y += p.randomRotation.y;
                 } else {
@@ -988,7 +1097,6 @@
                 if (appState === CONFIG.states.ZOOM && i === zoomedParticleIndex) {
                     p.mesh.lookAt(camera.position);
                 } else {
-                    // Smoothly return to original scale if not zoomed
                     if (p.originalScale && p.mesh.scale.x > p.originalScale.x && appState !== CONFIG.states.ZOOM) {
                          p.mesh.scale.lerp(p.originalScale, 0.05);
                     }
@@ -996,12 +1104,10 @@
                 }
             });
 
-            // 3. Snowfall Animation
             if (snowParticlesSystem) {
                 const positions = snowParticlesSystem.geometry.attributes.position.array;
                 for (let i = 1; i < positions.length; i += 3) {
-                    positions[i] -= 0.2; // Fall down
-                    // Reset if below floor
+                    positions[i] -= 0.2; 
                     if (positions[i] < -20) {
                         positions[i] = 100;
                     }
